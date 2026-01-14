@@ -1,42 +1,31 @@
 import streamlit as st
-import base64
+import gspread
+from google.oauth2.service_account import Credentials
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
+import base64
 
 
-
-# 폰트 적용 함수 (이 코드를 그대로 복사하세요)
+# --- 1. 폰트 설정 ---
 def add_custom_font(font_file):
     with open(font_file, "rb") as f:
         data = f.read()
     b64_font = base64.b64encode(data).decode()
-    
-    # CSS 스타일 적용
-    font_style = f"""
+    st.markdown(f"""
         <style>
-            @font-face {{
-                font-family: 'NanumGothic';
-                src: url(data:font/ttf;base64,{b64_font}) format('truetype');
-            }}
-            /* 앱 전체에 폰트 적용 */
-            html, body, [class*="css"] {{
-                font-family: 'NanumGothic', sans-serif;
-            }}
+            @font-face {{ font-family: 'NanumGothic'; src: url(data:font/ttf;base64,{b64_font}) format('truetype'); }}
+            html, body, [class*="css"] {{ font-family: 'NanumGothic', sans-serif; }}
         </style>
-    """
-    st.markdown(font_style, unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
-# 폰트 적용 실행 (파일 이름이 정확해야 해요!)
-try:
-    add_custom_font("NanumGothic.ttf")
-except FileNotFoundError:
-    st.error("폰트 파일을 찾을 수 없습니다. 같은 폴더에 'NanumGothic.ttf'가 있는지 확인해주세요.")
+add_custom_font("NanumGothic.ttf")
 
 
-# --- [영구 저장: 구글 시트 연결] ---
-# 💡 여기에 다혜님의 구글 시트 주소를 넣으세요!
-url = "https://docs.google.com/spreadsheets/d/1kf5G4bajzBTUWyJNz9REZM_5YwdIh06dPfPNlcsr_QM/edit?usp=sharing"
-conn = st.connection("gsheets", type=GSheetsConnection)
+# --- 2. 구글 시트 연결 함수 ---
+def get_gspread_client():
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    # Secrets에서 계정 정보 가져오기
+    credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+    return gspread.authorize(credentials)
 
 
 # 1. 사이드바 구성 (메뉴 선택)
@@ -45,7 +34,7 @@ st.sidebar.markdown("---")
 
 # 버튼 디자인 대신 라디오 버튼을 사용하여 탭 이동 구현 (가장 오류가 적은 방식입니다)
 # 'label_visibility="hidden"'으로 라디오 버튼 글자만 깔끔하게 보이게 처리할 수도 있습니다.
-menu = st.sidebar.radio("메뉴를 선택하세요", ["🧘‍♀️Mind", "🔥Task", "🧠Brain","⁉️긴급"])
+menu = st.sidebar.radio("메뉴를 선택하세요", ["🧘‍♀️Mind", "🔥Task", "🧠Brain","🚨긴급"])
 
 st.sidebar.markdown("---")
 st.sidebar.write("시간을 공백을 견뎌내자. .✨")
@@ -54,7 +43,7 @@ st.sidebar.write("시간을 공백을 견뎌내자. .✨")
 # 2. 메인 화면 구성
 
 # === [Mind] 탭 ===
-if menu == "Mind":
+if menu == "🧘‍♀️Mind":
     st.markdown("""
     <div style="text-align: center;">
         <h1 style="margin-bottom: 0;">🌿 일상 지키기</h1>
@@ -74,31 +63,29 @@ if menu == "Mind":
         """)
     st.divider()
     
-    # 데이터 불러오기
-    try:
-        df = conn.read(spreadsheet=url, usecols=[0, 1]) # 날짜와 달성률만 가져옴
-        last_progress = int(df.iloc[-1]['달성률']) if not df.empty else 0
-    except:
-        last_progress = 0
-    
-    st.subheader("===시스템1 가동중===")
-    # 예시로 50% 정도 진행된 상태를 보여줍니다.
-    # 나중에 실제 데이터와 연동하면 숫자가 자동으로 바뀝니다.
-    progress = st.progress(last_progress)
-    st.caption(f"최근 기록된 달성률: {last_progress}%")
+    # 데이터 입력 UI
+    st.subheader("시스템1 가동 상태")
+    score = st.slider("오늘의 에너지 레벨 (%)", 0, 100, 50)
+    memo = st.text_input("한 줄 코멘트", placeholder="오늘 하루는 어땠나요?")
 
-    st.divider()
-    
-    # --- 영구 저장 입력 부분 ---
-    st.write("### 오늘의 달성률 기록하기")
-    new_val = st.slider("기분이나 진행도를 선택하세요", 0, 100, last_progress)
-    
-    if st.button("기록 저장하기 💾"):
-        new_data = pd.DataFrame([{"날짜": pd.Timestamp.now().strftime('%Y-%m-%d %H:%M'), "달성률": new_val}])
-        # 실제 배포 환경에서는 시트 권한 설정이 필요합니다.
-        # 일단 화면에 성공 메시지를 띄우는 것부터 확인해보세요!
-        st.success(f"{new_val}% 기록 완료! 구글 시트를 확인해보세요.")
-        st.balloons()
+    if st.button("구글 시트에 영구 저장 💾"):
+        try:
+            client = get_gspread_client()
+            # 구글 시트 이름 정확히 입력! (미리 로봇 이메일과 공유되어 있어야 함)
+            sh = client.open("2026 계획") 
+            worksheet = sh.get_worksheet(0) # 첫 번째 시트 선택
+            
+            # 저장할 데이터 한 줄 만들기 (날짜, 점수, 메모)
+            now = pd.Timestamp.now(tz='Asia/Seoul').strftime('%Y-%m-%d %H:%M')
+            new_row = [now, score, memo]
+            
+            # 시트에 추가
+            worksheet.append_row(new_row)
+            
+            st.success(f"성공적으로 저장되었습니다! ({now})")
+            st.balloons()
+        except Exception as e:
+            st.error(f"오류가 발생했어요: {e}")
     
     # 펼치고 접는 기능 (Expander)
     with st.expander("▼ 연애하고 싶다면 ... ? (클릭)"):
@@ -111,7 +98,7 @@ if menu == "Mind":
         """)
 
 # === [Task] 탭 ===
-elif menu == "Task":
+elif menu == "🔥Task":
     st.title("출근도장 찍기 = 상품 1개")
     
     st.warning("어떤 일이 있어도 오전 9시 30분에는 커피 내리고 책상에 앉는다.")
@@ -155,8 +142,8 @@ elif menu == "Task":
         """)
 
 # === [Brain] 탭 ===
-elif menu == "🥗 뇌 건강 관리":
-    st.title("🧠 뇌 배터리 관리 매뉴얼")
+elif menu == "🧠Brain":
+    st.title("뇌 배터리 관리 매뉴얼")
     st.markdown("나의 의지력이 부족한 게 아닙니다. **과학적인 '에너지 고갈'** 상태입니다.")
     
     st.divider()
@@ -198,7 +185,7 @@ elif menu == "🥗 뇌 건강 관리":
     """)
     
     # === [긴급] 탭 ===
-elif menu == "긴급":
+elif menu == "🚨긴급":
     
     st.warning("⁉️갑자기 의욕이 떨어질때")
     
